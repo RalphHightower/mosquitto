@@ -179,11 +179,7 @@ struct mosquitto *net__socket_accept(struct mosquitto__listener_sock *listensock
 
 	if(db.config->set_tcp_nodelay && listensock->listener->port){
 		int flag = 1;
-#ifdef WIN32
-		if(setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int)) != 0){
-#else
-		if(setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int)) != 0){
-#endif
+		if(setsockopt(new_sock, IPPROTO_TCP, TCP_NODELAY, (const void *)&flag, sizeof(int)) != 0){
 			log__printf(NULL, MOSQ_LOG_WARNING, "Warning: Unable to set TCP_NODELAY.");
 		}
 	}
@@ -865,11 +861,11 @@ static int net__socket_listen_tcp(struct mosquitto__listener *listener)
 #ifndef WIN32
 		ss_opt = 1;
 		/* Unimportant if this fails */
-		(void)setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &ss_opt, sizeof(ss_opt));
+		(void)setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const void *)&ss_opt, sizeof(ss_opt));
 #endif
 #ifdef IPV6_V6ONLY
 		ss_opt = 1;
-		(void)setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &ss_opt, sizeof(ss_opt));
+		(void)setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (const void *)&ss_opt, sizeof(ss_opt));
 #endif
 
 		if(net__socket_nonblock(&sock)){

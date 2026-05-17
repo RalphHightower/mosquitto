@@ -32,6 +32,13 @@ if(APPLE)
 	set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -undefined dynamic_lookup")
 endif()
 
+set_property(GLOBAL PROPERTY TEST_ENV_VARS "BUILD_ROOT=${CMAKE_BINARY_DIR}")
+function(option_env name description value)
+	option(${name} "${description}" ${value})
+	get_property(test_vars GLOBAL PROPERTY TEST_ENV_VARS)
+	set_property(GLOBAL PROPERTY TEST_ENV_VARS "${test_vars};${name}=${${name}}")
+endfunction()
+
 add_library(common-options INTERFACE)
 if(NOT WIN32)
 	target_compile_options(common-options INTERFACE -Wall -Wextra -Wconversion)
@@ -45,18 +52,87 @@ include(GNUInstallDirs)
 include(CMakePushCheckState)
 include(CheckSourceCompiles)
 
-option(WITH_BUNDLED_DEPS "Build with bundled dependencies?" ON)
-option(WITH_LIB_CPP "Build C++ library?" ON)
-option(WITH_TLS "Include SSL/TLS support?" ON)
-option(WITH_TLS_PSK "Include TLS-PSK support (requires WITH_TLS)?" ON)
-option(WITH_TESTS "Enable tests" ON)
-option(INC_MEMTRACK "Include memory tracking support?" ON)
+find_package(cJSON REQUIRED)
+find_package(argon2)
 
-if (WITH_LIB_CPP OR WITH_TESTS)
+option_env(INC_MEMTRACK "Include memory tracking support?" ON)
+option_env(WITH_BUNDLED_DEPS "Build with bundled dependencies?" ON)
+option_env(WITH_CTRL_SHELL "Include mosquitto_ctrl interactive shell support?" ON)
+option_env(WITH_DLT "Include DLT support?" OFF)
+option_env(WITH_FUZZING "Build fuzzers instead of normal executables?" OFF)
+option_env(WITH_JEMALLOC "Build using the jemalloc memory allocator?" OFF)
+option_env(WITH_LIB_CPP "Build C++ library?" ON)
+option_env(WITH_LTO "Build with link time optimizations (IPO) / interprocedural optimization (IPO) enabled." ON)
+option_env(WITH_PARALLEL_TESTS "Run tests in parallel?" ON)
+option_env(WITH_PIC "Build the static library with PIC (Position Independent Code) enabled archives?" OFF)
+option_env(WITH_SOCKS "Include SOCKS5 support?" ON)
+option_env(WITH_SRV "Include SRV lookup support?" OFF)
+option_env(WITH_STATIC_LIBRARIES "Build static versions of the libmosquitto/pp libraries?" OFF)
+option_env(WITH_TESTS "Enable tests" ON)
+option_env(WITH_THREADING "Include threading support?" ON)
+option_env(WITH_TLS "Include SSL/TLS support?" ON)
+option_env(WITH_TLS_PSK "Include TLS-PSK support (requires WITH_TLS)?" ON)
+option_env(WITH_UNIX_SOCKETS "Include Unix Domain Socket support?" ON)
+option_env(WITH_WEBSOCKETS "Include websockets support?" ON)
+option_env(WITH_WEBSOCKETS_BUILTIN "Websockets support uses builtin library? Set OFF to use libwebsockets" ON)
+
+if(WITH_FUZZING)
+	set(WITH_TESTS OFF)
+	set(WITH_SHARED_LIBRARIES OFF)
+	set(WITH_STATIC_LIBRARIES ON)
+endif()
+
+if(ARGON2_FOUND)
+	# Disable until separate password handling thread is implemented
+	#add_definitions("-DWITH_ARGON2")
+endif()
+
+if(WITH_CTRL_SHELL)
+	find_package(LineEditing)
+endif()
+
+message(STATUS "WITH_DLT = ${WITH_DLT}")
+if(WITH_DLT)
+	find_package(PkgConfig)
+	pkg_check_modules(DLT "automotive-dlt >= 2.11" REQUIRED)
+endif()
+
+if(WITH_LIB_CPP OR WITH_TESTS)
 	ENABLE_LANGUAGE(CXX)
 endif()
 
-if (WITH_TLS)
+if(WITH_LTO)
+	include(CheckIPOSupported)
+	check_ipo_supported(RESULT is_ipo_supported OUTPUT output)
+	if(is_ipo_supported)
+		set_property(TARGET common-options PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+	else()
+		message(WARNING "LTO/IPO is not supported: ${output}")
+	endif()
+endif()
+
+if(WITH_SOCKS)
+	add_definitions("-DWITH_SOCKS")
+endif()
+
+if(WITH_THREADING)
+	add_definitions("-DWITH_THREADING")
+	if(WIN32)
+		find_package(PThreads4W REQUIRED)
+		set (THREADLIB PThreads4W::PThreads4W)
+	else()
+		set(THREADS_PREFER_PTHREAD_FLAG ON)
+		find_package(Threads REQUIRED)
+		set (THREADLIB Threads::Threads)
+	endif()
+endif()
+
+if(WITH_WEBSOCKETS AND WITH_WEBSOCKETS_BUILTIN AND NOT WITH_TLS)
+	set(WITH_TLS ON)
+	message(WARNING "Re-enabling TLS support because builtin WebSockets is requested. Set WITH_WEBSOCKETS_BUILTIN=OFF to allow WITH_TLS=OFF.")
+endif()
+
+if(WITH_TLS)
 	find_package(OpenSSL REQUIRED)
 	add_definitions("-DWITH_TLS")
 
@@ -73,73 +149,19 @@ else()
 	set (OPENSSL_INCLUDE_DIR "")
 endif()
 
-option(WITH_UNIX_SOCKETS "Include Unix Domain Socket support?" ON)
 if(WITH_UNIX_SOCKETS)
 	add_definitions("-DWITH_UNIX_SOCKETS")
-endif()
-
-option(WITH_SOCKS "Include SOCKS5 support?" ON)
-if(WITH_SOCKS)
-	add_definitions("-DWITH_SOCKS")
-endif()
-
-option(WITH_WEBSOCKETS "Include websockets support?" ON)
-option(WITH_WEBSOCKETS_BUILTIN "Websockets support uses builtin library? Set OFF to use libwebsockets" ON)
-
-if(WITH_WEBSOCKETS AND NOT WITH_TLS)
-	message(FATAL_ERROR "WITH_WEBSOCKETS support requires WITH_TLS.")
-endif()
-option(WITH_SRV "Include SRV lookup support?" OFF)
-option(WITH_STATIC_LIBRARIES "Build static versions of the libmosquitto/pp libraries?" OFF)
-option(WITH_PIC "Build the static library with PIC (Position Independent Code) enabled archives?" OFF)
-
-option(WITH_THREADING "Include threading support?" ON)
-if(WITH_THREADING)
-	add_definitions("-DWITH_THREADING")
-	if(WIN32)
-		find_package(PThreads4W REQUIRED)
-	endif()
-endif()
-
-option(WITH_DLT "Include DLT support?" OFF)
-message(STATUS "WITH_DLT = ${WITH_DLT}")
-if(WITH_DLT)
-	find_package(PkgConfig)
-	pkg_check_modules(DLT "automotive-dlt >= 2.11" REQUIRED)
-endif()
-
-find_package(cJSON REQUIRED)
-find_package(argon2)
-
-option(WITH_CTRL_SHELL "Include mosquitto_ctrl interactive shell support?" ON)
-if(WITH_CTRL_SHELL)
-	find_package(LineEditing)
-endif()
-if(ARGON2_FOUND)
-	# Disable until separate password handling thread is implemented
-	#add_definitions("-DWITH_ARGON2")
-endif()
-
-option(WITH_LTO "Build with link time optimizations (IPO) / interprocedural optimization (IPO) enabled." ON)
-if(WITH_LTO)
-	include(CheckIPOSupported)
-	check_ipo_supported(RESULT is_ipo_supported OUTPUT output)
-	if(is_ipo_supported)
-		set_property(TARGET common-options PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-	else()
-		message(WARNING "LTO/IPO is not supported: ${output}")
-	endif()
 endif()
 
 # ========================================
 # Include projects
 # ========================================
 
-option(WITH_CLIENTS "Build clients?" ON)
-option(WITH_BROKER "Build broker?" ON)
-option(WITH_APPS "Build apps?" ON)
-option(WITH_PLUGINS "Build plugins?" ON)
-option(WITH_DOCS "Build documentation?" ON)
+option_env(WITH_APPS "Build apps?" ON)
+option_env(WITH_BROKER "Build broker?" ON)
+option_env(WITH_CLIENTS "Build clients?" ON)
+option_env(WITH_DOCS "Build documentation?" ON)
+option_env(WITH_PLUGINS "Build plugins?" ON)
 
 target_sources(common-options INTERFACE config.h)
 target_include_directories(common-options
@@ -162,6 +184,12 @@ if(WITH_BUNDLED_DEPS)
 	)
 endif()
 
+if(WITH_JEMALLOC)
+	target_link_libraries(common-options
+		INTERFACE
+			jemalloc
+	)
+endif()
 
 add_subdirectory(libcommon)
 add_subdirectory(lib)
@@ -177,12 +205,16 @@ if(WITH_APPS)
 	add_subdirectory(apps)
 endif()
 
-if(WITH_PLUGINS)
+if(WITH_BROKER AND WITH_PLUGINS)
 	add_subdirectory(plugins)
 endif()
 
 if(WITH_DOCS)
 	add_subdirectory(man)
+endif()
+
+if(WITH_FUZZING)
+	add_subdirectory(fuzzing)
 endif()
 
 # ========================================
@@ -260,5 +292,82 @@ if(WITH_TESTS)
 	find_package(GTest REQUIRED)
 	include(GoogleTest)
 	enable_testing()
+
+	function(get_test_files GLOB_LIST EXCLUDE_LIST PY_NAME_LIST)
+		set(LOCAL_LIST )
+		foreach(PY_TEST_FILE ${${GLOB_LIST}})
+			get_filename_component(PY_TEST_NAME ${PY_TEST_FILE} NAME_WE)
+			if(${PY_TEST_NAME} IN_LIST EXCLUDE_LIST)
+				continue()
+			else()
+				list(APPEND LOCAL_LIST ${PY_TEST_NAME})
+			endif()
+		endforeach()
+		set(${PY_NAME_LIST} "${LOCAL_LIST}" PARENT_SCOPE)
+	endfunction()
+
+    function(mosq_test_set_windows_path name)
+        if(WIN32)
+            set(PATHMOD
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmosquitto_common>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmosquitto>"
+                "PATH=path_list_prepend:${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin"
+            )
+            set_property(TEST ${name}
+				PROPERTY
+					ENVIRONMENT_MODIFICATION "${PATHMOD}"
+			)
+        endif()
+    endfunction()
+
+	function(mosq_set_test_props name)
+		set(fullname "${prefix}-${name}")
+		get_property(test_vars GLOBAL PROPERTY TEST_ENV_VARS)
+		set_tests_properties("${name}"
+			PROPERTIES
+				ENVIRONMENT "${test_vars}"
+				SKIP_RETURN_CODE 77
+		)
+		mosq_test_set_windows_path(${name})
+	endfunction()
+
+	function(add_python_test PY_TEST_LIST PREFIX PORTS PY_TEST_FILE)
+		set(LOCAL_LIST ${${PY_TEST_LIST}})
+		get_filename_component(PY_TEST_NAME ${PY_TEST_FILE} NAME_WE)
+		if(${PY_TEST_NAME} IN_LIST LOCAL_LIST)
+			list(REMOVE_ITEM LOCAL_LIST ${PY_TEST_NAME})
+			set(${PY_TEST_LIST} "${LOCAL_LIST}" PARENT_SCOPE)
+		else()
+			message(SEND_ERROR "Adding non-existent test: ${PY_TEST_FILE}")
+		endif()
+		add_test(NAME ${PREFIX}${PY_TEST_NAME} COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/${PY_TEST_FILE})
+		mosq_set_test_props(${PREFIX}${PY_TEST_NAME})
+		if(${PORTS} GREATER 0)
+			set(PORT_LIST )
+			foreach(X RANGE 1 ${PORTS})
+				list(APPEND PORT_LIST "ports:1")
+			endforeach()
+			list(JOIN PORT_LIST "," PORT_REQ)
+			set_tests_properties(${PREFIX}${PY_TEST_NAME}
+				PROPERTIES
+					RESOURCE_GROUPS "${PORT_REQ}"
+			)
+		endif()
+	endfunction()
+
+	function(check_for_missing_tests PY_TEST_LIST)
+		foreach(PY_TEST ${${PY_TEST_LIST}})
+			message(SEND_ERROR "Test needs adding: ${PY_TEST}")
+		endforeach()
+	endfunction()
+
+	if(WITH_PARALLEL_TESTS)
+		set(CMAKE_CTEST_ARGUMENTS
+			"-j20"
+			"--resource-spec-file ../test/resource.json"
+			"--output-on-failure"
+			"--repeat until-pass:5"
+		)
+	endif()
 	add_subdirectory(test)
 endif()

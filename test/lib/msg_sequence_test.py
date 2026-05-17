@@ -10,6 +10,8 @@ import socket
 import json
 from collections import deque
 import mosq_test
+import platform
+import signal
 
 send = 1
 recv = 2
@@ -52,10 +54,10 @@ class MsgSequence(object):
         self.sock = -1
         self.client = None
         if default_connect:
-            self.add_recv(mosq_test.gen_connect("fuzzish", proto_ver=proto_ver), "default connect")
+            self.add_recv(mqtt_packets.gen_connect("fuzzish", proto_ver=proto_ver), "default connect")
         if default_connack:
             properties = mqtt5_props.gen_uint16_prop(mqtt5_props.RECEIVE_MAXIMUM, 20)
-            self.add_send(mosq_test.gen_connack(rc=0, proto_ver=proto_ver, properties=properties, property_helper=False), "default connack")
+            self.add_send(mqtt_packets.gen_connack(rc=0, proto_ver=proto_ver, properties=properties, property_helper=False), "default connack")
 
     def add_msg(self, message):
         try:
@@ -90,7 +92,7 @@ class MsgSequence(object):
 
         env = mosq_test.env_add_ld_library_path()
         cmd = [
-                mosq_test.get_build_root() + '/test/lib/c/fuzzish.test',
+                Path(mosq_test.get_build_root(), 'test', 'lib', 'c', mosq_test.get_build_type(), 'fuzzish.exe'),
                 str(port), str(self.proto_ver), str(self.clean_start)
                 ]
         if os.environ.get('MOSQ_USE_VALGRIND') is not None:
@@ -101,12 +103,19 @@ class MsgSequence(object):
 
         if self.command is not None:
             cmd.append(self.command)
-        self.client = subprocess.Popen(cmd, stderr=subprocess.PIPE, env=env)
+        if platform.system() == 'Windows':
+            self.client = subprocess.Popen(cmd, stderr=subprocess.PIPE, env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        else:
+            self.client = subprocess.Popen(cmd, stderr=subprocess.PIPE, env=env)
+
         (self.sock, _) = server_sock.accept()
 
     def kill_client(self):
         self.sock.close()
-        self.client.terminate()
+        if platform.system() == 'Windows':
+            self.client.send_signal(signal.CTRL_C_EVENT)
+        else:
+            self.client.terminate()
         self.client.wait()
         if self.client.returncode != 0:
             raise RuntimeError
@@ -123,32 +132,32 @@ class MsgSequence(object):
         self.sock.send(msg.message)
 
     def _publish_message(self, msg):
-        sock = mosq_test.client_connect_only(hostname="localhost", port=1888, timeout=2)
-        sock.send(mosq_test.gen_connect("helper"))
-        mosq_test.expect_packet(sock, "connack", mosq_test.gen_connack(rc=0))
+        sock = mosq_test.client_connect_only(hostname="localhost", port=self.port, timeout=2)
+        sock.send(mqtt_packets.gen_connect("helper"))
+        mosq_test.expect_packet(sock, "connack", mqtt_packets.gen_connack(rc=0))
 
         m = msg.message
         if m['qos'] == 0:
-            sock.send(mosq_test.gen_publish(topic=m['topic'], payload=m['payload']))
+            sock.send(mqtt_packets.gen_publish(topic=m['topic'], payload=m['payload']))
         elif m['qos'] == 1:
-            sock.send(mosq_test.gen_publish(mid=1, qos=1, topic=m['topic'], payload=m['payload']))
-            mosq_test.expect_packet(sock, "helper puback", mosq_test.gen_puback(mid=1))
+            sock.send(mqtt_packets.gen_publish(mid=1, qos=1, topic=m['topic'], payload=m['payload']))
+            mosq_test.expect_packet(sock, "helper puback", mqtt_packets.gen_puback(mid=1))
         elif m['qos'] == 2:
-            sock.send(mosq_test.gen_publish(mid=1, qos=2, topic=m['topic'], payload=m['payload']))
-            mosq_test.expect_packet(sock, "helper pubrec", mosq_test.gen_pubrec(mid=1))
-            sock.send(mosq_test.gen_pubrel(mid=1))
-            mosq_test.expect_packet(sock, "helper pubcomp", mosq_test.gen_pubcomp(mid=1))
+            sock.send(mqtt_packets.gen_publish(mid=1, qos=2, topic=m['topic'], payload=m['payload']))
+            mosq_test.expect_packet(sock, "helper pubrec", mqtt_packets.gen_pubrec(mid=1))
+            sock.send(mqtt_packets.gen_pubrel(mid=1))
+            mosq_test.expect_packet(sock, "helper pubcomp", mqtt_packets.gen_pubcomp(mid=1))
         sock.close()
 
     def _recv_message(self, msg):
         data = self.sock.recv(len(msg.message))
         if data != msg.message:
-            raise ValueError("Receive message %s | %s | %s" % (msg.comment, data, msg.message))
+            raise ValueError("Receive message %s | rec:%s | exp:%s" % (msg.comment, data.hex(), msg.message.hex()))
 
 
     def _puback_check(self):
-        publish_packet = mosq_test.gen_publish(mid=65535, qos=1, topic="alive check", payload="payload", proto_ver=self.proto_ver)
-        puback_packet = mosq_test.gen_puback(mid=65535, proto_ver=self.proto_ver)
+        publish_packet = mqtt_packets.gen_publish(mid=65535, qos=1, topic="alive check", payload="payload", proto_ver=self.proto_ver)
+        puback_packet = mqtt_packets.gen_puback(mid=65535, proto_ver=self.proto_ver)
         self.sock.send(publish_packet)
         packet = self.sock.recv(len(puback_packet))
         return packet == puback_packet
@@ -158,7 +167,7 @@ class MsgSequence(object):
         try:
             if self._puback_check() and self.expect_disconnect:
                 raise ValueError("Still connected")
-        except ConnectionResetError:
+        except (ConnectionAbortedError, ConnectionResetError):
             if self.expect_disconnect:
                 pass
             else:
@@ -252,11 +261,7 @@ def do_test(hostname, port):
     succeeded = 0
     test = None
 
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_sock.settimeout(10)
-    server_sock.bind(('', port))
-    server_sock.listen(5)
+    server_sock = mosq_test.listen_sock(port)
 
     for seq in sorted(sequences):
         if seq[-5:] != ".json":

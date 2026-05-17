@@ -5,35 +5,31 @@
 
 from mosq_test_helper import *
 
-def do_test(start_broker):
-    rc = 1
-
+def do_test():
     props = mqtt5_props.gen_uint32_prop(mqtt5_props.MAXIMUM_PACKET_SIZE, 40)
-    connect_packet = mosq_test.gen_connect("12-max-publish-qos1", proto_ver=5, properties=props)
-    connack_packet = mosq_test.gen_connack(rc=0, proto_ver=5)
+    connect_packet = mqtt_packets.gen_connect("12-max-publish-qos1", proto_ver=5, properties=props)
+    connack_packet = mqtt_packets.gen_connack(rc=0, proto_ver=5)
 
     mid = 1
-    subscribe_packet = mosq_test.gen_subscribe(mid, "12/max/publish/qos1/test/topic", 1, proto_ver=5)
-    suback_packet = mosq_test.gen_suback(mid, 1, proto_ver=5)
+    subscribe_packet = mqtt_packets.gen_subscribe(mid, "12/max/publish/qos1/test/topic", 1, proto_ver=5)
+    suback_packet = mqtt_packets.gen_suback(mid, 1, proto_ver=5)
 
     mid=1
-    publish1_packet = mosq_test.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="1234", proto_ver=5)
-    puback1_packet = mosq_test.gen_puback(mid, proto_ver=5)
+    publish1_packet = mqtt_packets.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="1234", proto_ver=5)
+    puback1_packet = mqtt_packets.gen_puback(mid, proto_ver=5)
 
     mid=2
     props = mqtt5_props.gen_byte_prop(mqtt5_props.PAYLOAD_FORMAT_INDICATOR, 1)
-    publish2_packet = mosq_test.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="56", proto_ver=5, properties=props)
-    puback2_packet = mosq_test.gen_puback(mid, proto_ver=5)
+    publish2_packet = mqtt_packets.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="56", proto_ver=5, properties=props)
+    puback2_packet = mqtt_packets.gen_puback(mid, proto_ver=5)
 
     mid=3
-    publish3_packet = mosq_test.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="789", proto_ver=5)
-    puback3_packet = mosq_test.gen_puback(mid, proto_ver=5)
+    publish3_packet = mqtt_packets.gen_publish(topic="12/max/publish/qos1/test/topic", mid=mid, qos=1, payload="789", proto_ver=5)
+    puback3_packet = mqtt_packets.gen_puback(mid, proto_ver=5)
 
     port = mosq_test.get_port()
-    if start_broker:
-        broker = mosq_test.start_broker(filename=os.path.basename(__file__), port=port)
-
-    try:
+    broker = MosquittoBroker(port=port)
+    with broker:
         sock = mosq_test.do_client_connect(connect_packet, connack_packet, port=port)
         mosq_test.do_send_receive(sock, subscribe_packet, suback_packet)
 
@@ -47,24 +43,7 @@ def do_test(start_broker):
 
         sock.send(publish3_packet)
         mosq_test.receive_unordered(sock, puback3_packet, publish3_packet, "puback 3/publish3")
-        rc = 0
-    except mosq_test.TestError:
-        pass
-    finally:
-        if start_broker:
-            broker.terminate()
-            if mosq_test.wait_for_subprocess(broker):
-                print("broker not terminated")
-                if rc == 0: rc=1
-            (stdo, stde) = broker.communicate()
-            if rc:
-                print(stde.decode('utf-8'))
-                exit(rc)
-        else:
-            return rc;
 
-def all_tests(start_broker=False):
-    return do_test(start_broker)
 
 if __name__ == '__main__':
-    all_tests(True)
+    do_test()

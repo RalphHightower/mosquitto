@@ -12,7 +12,7 @@ import mqtt5_props
 
 persist_help = persist_module()
 
-port = mosq_test.get_port()
+port, _ = mosq_test.get_port(2)
 
 proto_ver = 5
 qos = 1
@@ -21,7 +21,6 @@ username = "test-will-msg"
 
 subscriber_id = "test-will-subscriber"
 publisher_id = "test-will-publisher"
-helper_id = "test-helper"
 
 will_properties = mqtt5_props.gen_properties(
     [
@@ -77,7 +76,7 @@ def do_test(
             subscribe_topic=topic if do_subscribe else None,
         )
         if expect_will_publish:
-            will_publish = mosq_test.gen_publish(
+            will_publish = mqtt_packets.gen_publish(
                 topic,
                 will_qos,
                 will_payload,
@@ -87,7 +86,7 @@ def do_test(
                 properties=will_properties,
             )
             if will_qos > 0:
-                pub_ack = mosq_test.gen_puback(mid=1, proto_ver=proto_ver)
+                pub_ack = mqtt_packets.gen_puback(mid=1, proto_ver=proto_ver)
                 mosq_test.do_receive_send(subscriber_sock, will_publish, pub_ack)
             else:
                 mosq_test.expect_packet(subscriber_sock, "will message", will_publish)
@@ -158,7 +157,7 @@ def do_test(
             else:
                 mosq_test.do_send(
                     publisher_sock,
-                    mosq_test.gen_disconnect(
+                    mqtt_packets.gen_disconnect(
                         reason_code=disconnect_rc, proto_ver=proto_ver
                     ),
                 )
@@ -166,18 +165,8 @@ def do_test(
         else:
             will_sent = False
 
-        # Send an additional ping to make sure the commit to the DB has happened
-        helper_sock = connect_client(
-            port, helper_id, username, proto_ver, session_expiry=0
-        )
-        mosq_test.do_ping(helper_sock)
-        helper_sock.close()
-
-        # Kill the broker
-        broker.kill()
-        (_, stde) = broker.communicate()
-        broker = None
-
+        # Do check whilst broker is still running, the retry on check_*() will
+        # ensure that the changes are committed to disk before the broker is killed
         if will_sent and will_qos > 0:
             num_client_msgs = 1
         else:
@@ -205,6 +194,11 @@ def do_test(
                 properties=will_properties_in_db,
             )
 
+        # Kill the broker
+        broker.kill()
+        stde = mosq_test.broker_log(broker)
+        broker = None
+
         # Restart broker
         broker = mosq_test.start_broker(filename=conf_file, use_conf=True, port=port)
 
@@ -221,11 +215,11 @@ def do_test(
         rc = broker_terminate_rc
     finally:
         if broker is not None:
-            broker.terminate()
+            mosq_test.terminate_broker(broker)
             if mosq_test.wait_for_subprocess(broker):
                 if rc == 0:
                     rc = 1
-            (_, stde3) = broker.communicate()
+            stde3 = mosq_test.broker_log(broker)
             if not stde:
                 stde = stde3
             else:
@@ -235,10 +229,10 @@ def do_test(
 
         if rc:
             if stde:
-                print(stde.decode("utf-8"))
+                print(stde)
             if stde2:
                 print("Broker after restart")
-                print(stde2.decode("utf-8"))
+                print(stde2)
         # assert rc == 0, f"rc: {rc}"
 
 

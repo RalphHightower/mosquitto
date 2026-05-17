@@ -17,7 +17,7 @@ target_include_directories(libcommon-test
 target_link_libraries(libcommon-test
 	PRIVATE
 		common-unit-test-header
-		OpenSSL::SSL
 		libmosquitto_common
 )
 add_test(NAME unit-libcommon-test COMMAND libcommon-test)
+mosq_test_set_windows_path("unit-libcommon-test")

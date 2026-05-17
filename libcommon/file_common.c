@@ -36,7 +36,6 @@ Contributors:
 #  include <io.h>
 #  include <lmcons.h>
 #  include <fcntl.h>
-#  define PATH_MAX MAX_PATH
 #else
 #  include <sys/stat.h>
 #  include <pwd.h>
@@ -46,6 +45,10 @@ Contributors:
 #endif
 
 #include "mosquitto.h"
+
+#ifndef PATH_MAX
+#  define PATH_MAX MAX_PATH
+#endif
 
 void (*libcommon_vprintf)(const char *fmt, va_list va) = NULL;
 
@@ -457,7 +460,7 @@ int mosquitto_read_file(const char *file, bool restrict_read, char **buf, size_t
 	if(buflen){
 		*buflen = 0;
 	}
-	fptr = mosquitto_fopen(file, "rt", restrict_read);
+	fptr = mosquitto_fopen(file, "rb", restrict_read);
 	if(fptr == NULL){
 		return MOSQ_ERR_ERRNO;
 	}
