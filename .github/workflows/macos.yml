@@ -1,4 +1,4 @@
-name: Mac OS build
+name: Mac OS
 
 on:
   workflow_dispatch:
@@ -17,12 +17,15 @@ on:
       - develop
       - release/*
 
+permissions:
+  contents: read
+
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
 
 jobs:
-  mosquitto:
+  build:
     runs-on: macos-latest
 
     steps:

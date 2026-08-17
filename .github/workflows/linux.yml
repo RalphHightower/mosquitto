@@ -1,18 +1,24 @@
-name: Mosquitto - Build variants
+name: Linux
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
-      - develop
       - fixes
+      - develop
       - release/*
+    tags:
+      - 'v[0-9]+.*'
   pull_request:
     branches:
       - master
-      - develop
       - fixes
+      - develop
       - release/*
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -23,22 +29,28 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          ccache \
-          cmake \
           docbook-xsl \
+          ccache \
+          lcov \
           libargon2-dev \
           libc-ares-dev \
           libcjson-dev \
+          libcjson1 \
           libcunit1-dev \
           libedit-dev \
           libgmock-dev \
           libmicrohttpd-dev \
           libssl-dev \
-          libsystemd-dev \
           libwrap0-dev \
+          ninja-build \
+          microsocks \
           python3-all \
+          python3-paho-mqtt \
+          python3-psutil \
           uthash-dev \
           xsltproc
+
+    - uses: actions/checkout@v6
 
     - name: Configure ccache
       run: |
@@ -49,14 +61,24 @@ jobs:
       uses: actions/cache@v5
       with:
         path: ccache
-        key: ${{ runner.os }}-build-variants-ccache
+        key: ${{ runner.os }}-cmake-ccache
 
-    - uses: actions/checkout@v6
-      with:
-        submodules: 'true'
+    - run: cmake -E make_directory build
 
-    - name: build
-      run: ./buildtest.py
+    - run: |
+        cmake \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -S . \
+          -B build
+      env:
+        CC: "ccache gcc"
+        CXX: "ccache g++"
+
+    - run: cmake --build build --parallel $(nproc)
 
     - name: Report ccache stats
       run: ccache -s
+
+    - working-directory: build/
+      run: ctest -j20 --resource-spec-file ../test/resource.json --output-on-failure --repeat until-pass:5

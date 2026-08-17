@@ -99,7 +99,7 @@ int handle__accepted_publish(struct mosquitto *context, struct mosquitto__base_m
 			(cmsg_stored->base_msg->data.qos != base_msg->data.qos
 			|| cmsg_stored->base_msg->data.payloadlen != base_msg->data.payloadlen
 			|| strcmp(cmsg_stored->base_msg->data.topic, base_msg->data.topic)
-			|| memcmp(cmsg_stored->base_msg->data.payload, base_msg->data.payload, base_msg->data.payloadlen))){
+			|| (base_msg->data.payloadlen > 0 && memcmp(cmsg_stored->base_msg->data.payload, base_msg->data.payload, base_msg->data.payloadlen)))){
 
 		log__printf(NULL, MOSQ_LOG_WARNING, "Reused message ID %u from %s detected. Clearing from storage.", base_msg->data.source_mid, context->id);
 		db__message_remove_incoming(context, base_msg->data.source_mid);

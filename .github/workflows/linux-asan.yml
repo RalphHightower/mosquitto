@@ -1,21 +1,24 @@
-name: Mosquitto - CMake
+name: Linux - ASAN
 
 on:
   workflow_dispatch:
   push:
     branches:
       - master
-      - fixes
       - develop
+      - fixes
       - release/*
     tags:
       - 'v[0-9]+.*'
   pull_request:
     branches:
       - master
-      - fixes
       - develop
+      - fixes
       - release/*
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -26,8 +29,9 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          docbook-xsl \
           ccache \
+          clang \
+          docbook-xsl \
           lcov \
           libargon2-dev \
           libc-ares-dev \
@@ -39,8 +43,8 @@ jobs:
           libmicrohttpd-dev \
           libssl-dev \
           libwrap0-dev \
-          ninja-build \
           microsocks \
+          ninja-build \
           python3-all \
           python3-paho-mqtt \
           python3-psutil \
@@ -58,7 +62,7 @@ jobs:
       uses: actions/cache@v5
       with:
         path: ccache
-        key: ${{ runner.os }}-cmake-ccache
+        key: ${{ runner.os }}-asan-ccache
 
     - run: cmake -E make_directory build
 
@@ -66,11 +70,15 @@ jobs:
         cmake \
           -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DWITH_SHARED_LIBCOMMON=ON \
           -S . \
           -B build
       env:
-        CC: "ccache gcc"
-        CXX: "ccache g++"
+        CC: "ccache clang"
+        CXX: "ccache clang++"
+        CFLAGS: "-fsanitize=address -fno-omit-frame-pointer"
+        CXXFLAGS: "-fsanitize=address -fno-omit-frame-pointer"
+        LDFLAGS: "-fsanitize=address -fno-omit-frame-pointer -static-libsan"
 
     - run: cmake --build build --parallel $(nproc)
 
